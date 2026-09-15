@@ -1,0 +1,43 @@
+name: Riga repair-zone watch
+
+on:
+  schedule:
+    # every 6 hours (UTC). Use "0 */3 * * *" if the repository is public,
+    # where Actions minutes are unlimited.
+    - cron: "5 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ais-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install websockets
+
+      - name: Listen to AIS stream
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+        run: python ais_watch.py
+
+      - name: Commit results
+        run: |
+          git config user.name "ais-watch"
+          git config user.email "actions@github.com"
+          git add state.json events.csv current.md
+          git diff --staged --quiet || git commit -m "AIS update $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase
+          git push
