@@ -1,0 +1,39 @@
+{
+  "subscription_box": [[56.93, 23.95], [57.09, 24.20]],
+
+  "zones": [
+    {
+      "name": "Riga Shipyard (Vecmilgravis)",
+      "lat_min": 57.0245,
+      "lat_max": 57.0375,
+      "lon_min": 24.1130,
+      "lon_max": 24.1350,
+      "priority": "high"
+    },
+    {
+      "name": "Milgravis channel berths",
+      "lat_min": 57.0150,
+      "lat_max": 57.0250,
+      "lon_min": 24.1050,
+      "lon_max": 24.1300,
+      "priority": "medium"
+    },
+    {
+      "name": "Bolderaja / Daugavgriva repair berths",
+      "lat_min": 57.0350,
+      "lat_max": 57.0600,
+      "lon_min": 24.0250,
+      "lon_max": 24.0750,
+      "priority": "medium"
+    }
+  ],
+
+  "rules": {
+    "listen_seconds": 600,
+    "max_speed_knots": 0.6,
+    "dwell_hours_to_alert": 24,
+    "session_gap_hours": 12,
+    "min_length_m": 55,
+    "excluded_ship_types": [30, 31, 32, 33, 34, 35, 36, 37, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+  }
+}
