@@ -6,6 +6,11 @@ on:
     # where Actions minutes are unlimited.
     - cron: "5 */6 * * *"
   workflow_dispatch:
+    inputs:
+      listen_seconds:
+        description: "How long to listen, in seconds (use 90 for a quick test)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -19,9 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -31,22 +36,51 @@ jobs:
       - name: Listen to AIS stream
         env:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          LISTEN_SECONDS: ${{ inputs.listen_seconds }}
         run: python ais_watch.py
 
       - name: Commit results
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           git config user.name "ais-watch"
           git config user.email "actions@github.com"
+
+          # keep a copy of what this run produced, so that a clash with a
+          # parallel run can be resolved in favour of the fresh data
+          mkdir -p /tmp/out
+          for f in state.json current.md events.csv; do
+            [ -f "$f" ] && cp "$f" /tmp/out/
+          done
+
           git add -A
           if git diff --staged --quiet; then
             echo "Nothing changed, nothing to save."
             exit 0
           fi
           git commit -m "AIS update $(date -u +%Y-%m-%dT%H:%MZ)"
-          echo "Pushing to branch ${GITHUB_REF_NAME}"
-          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            echo "Push rejected, trying to reconcile once."
-            git pull --rebase origin "${GITHUB_REF_NAME}"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+
+          if git push origin "HEAD:${BRANCH}"; then
+            echo "Saved."
+            exit 0
           fi
-          echo "Saved."
+
+          echo "Someone else pushed first. Rebuilding on top of their version."
+          git rebase --abort 2>/dev/null || true
+          git fetch origin "${BRANCH}"
+          git reset --hard "origin/${BRANCH}"
+
+          cp /tmp/out/state.json state.json 2>/dev/null || true
+          cp /tmp/out/current.md current.md 2>/dev/null || true
+          if [ -f /tmp/out/events.csv ]; then
+            if [ -f events.csv ]; then
+              awk 'NR==FNR{seen[$0];next} !($0 in seen)' events.csv /tmp/out/events.csv >> events.csv
+            else
+              cp /tmp/out/events.csv events.csv
+            fi
+          fi
+
+          git add -A
+          git diff --staged --quiet || git commit -m "AIS update $(date -u +%Y-%m-%dT%H:%MZ) (merged)"
+          git push origin "HEAD:${BRANCH}"
+          echo "Saved after merge."
