@@ -2,7 +2,7 @@ name: Riga repair-zone watch
 
 on:
   schedule:
-    # every 6 hours (UTC). Use "0 */3 * * *" if the repository is public,
+    # every 6 hours (UTC). Use "5 */3 * * *" if the repository is public,
     # where Actions minutes are unlimited.
     - cron: "5 */6 * * *"
   workflow_dispatch:
@@ -38,6 +38,15 @@ jobs:
           git config user.name "ais-watch"
           git config user.email "actions@github.com"
           git add -A
-          git diff --staged --quiet || git commit -m "AIS update $(date -u +%Y-%m-%dT%H:%MZ)"
-          git pull --rebase
-          git push
+          if git diff --staged --quiet; then
+            echo "Nothing changed, nothing to save."
+            exit 0
+          fi
+          git commit -m "AIS update $(date -u +%Y-%m-%dT%H:%MZ)"
+          echo "Pushing to branch ${GITHUB_REF_NAME}"
+          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "Push rejected, trying to reconcile once."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          echo "Saved."
