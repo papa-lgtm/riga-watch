@@ -32,7 +32,7 @@
     "listen_seconds": 600,
     "max_speed_knots": 0.6,
     "dwell_hours_to_alert": 24,
-    "session_gap_hours": 12,
+    "session_gap_hours": 20,
     "min_length_m": 55,
     "excluded_ship_types": [30, 31, 32, 33, 34, 35, 36, 37, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
   }
