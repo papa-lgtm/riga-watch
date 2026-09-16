@@ -58,15 +58,19 @@ def find_zone(lat, lon, zones):
     return None
 
 
-def is_interesting(vessel, rules):
-    """Filter out harbour craft, small vessels and anything still unidentified."""
+def rejection_reason(vessel, rules):
+    """Return why a vessel is not interesting, or None if it is."""
     ship_type = vessel.get("ship_type")
     if ship_type is not None and ship_type in rules["excluded_ship_types"]:
-        return False
+        return f"ship type {ship_type} excluded"
     length = vessel.get("length_m")
     if length is not None and length < rules["min_length_m"]:
-        return False
-    return True
+        return f"length {length} m below {rules['min_length_m']} m"
+    return None
+
+
+def is_interesting(vessel, rules):
+    return rejection_reason(vessel, rules) is None
 
 
 # ---------------------------------------------------------------- collection
@@ -83,8 +87,14 @@ async def collect(api_key, cfg):
         "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
     }
 
+    stats = {"raw": 0, "position": 0, "static": 0, "other": 0}
+    first_shown = False
+
     async with websockets.connect(STREAM_URL, ping_interval=20) as ws:
         await ws.send(json.dumps(subscription))
+        print(f"subscribed with box {cfg['subscription_box']}, "
+              f"listening for {rules['listen_seconds']} s")
+
         while now() < deadline:
             remaining = (deadline - now()).total_seconds()
             if remaining <= 0:
@@ -93,9 +103,43 @@ async def collect(api_key, cfg):
                 raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
             except asyncio.TimeoutError:
                 break
-            handle_message(json.loads(raw), seen)
 
-    return {mmsi: v for mmsi, v in seen.items() if is_interesting(v, rules)}
+            msg = json.loads(raw)
+            stats["raw"] += 1
+
+            # aisstream reports a rejected subscription as a plain error frame
+            if isinstance(msg, dict) and ("error" in msg or "Error" in msg):
+                raise RuntimeError(f"aisstream rejected the subscription: {msg}")
+
+            if not first_shown:
+                print(f"first message looks like: {json.dumps(msg)[:400]}")
+                first_shown = True
+
+            mtype = msg.get("MessageType")
+            if mtype == "PositionReport":
+                stats["position"] += 1
+            elif mtype == "ShipStaticData":
+                stats["static"] += 1
+            else:
+                stats["other"] += 1
+
+            handle_message(msg, seen)
+
+    print(f"messages: {stats['raw']} total "
+          f"({stats['position']} position, {stats['static']} static, {stats['other']} other)")
+    print(f"unique vessels seen in box: {len(seen)}")
+
+    kept, dropped = {}, []
+    for mmsi, v in seen.items():
+        reason = rejection_reason(v, rules)
+        if reason is None:
+            kept[mmsi] = v
+        else:
+            dropped.append(f"{v.get('name') or mmsi}: {reason}")
+
+    if dropped:
+        print(f"filtered out {len(dropped)}: " + "; ".join(dropped[:15]))
+    return kept
 
 
 def handle_message(msg, seen):
@@ -144,14 +188,24 @@ def update_state(snapshot, state, cfg, run_time):
     gap = timedelta(hours=rules["session_gap_hours"])
     events = []
 
+    in_zone = moving = 0
+
     for mmsi, v in snapshot.items():
         if v["lat"] is None:
             continue
         zone = find_zone(v["lat"], v["lon"], cfg["zones"])
         sog = v.get("sog")
         stationary = sog is None or sog <= rules["max_speed_knots"]
+        if zone is not None:
+            in_zone += 1
+            if not stationary:
+                moving += 1
+                print(f"  in zone but moving: {v.get('name') or mmsi} "
+                      f"{sog} kn, {zone}")
         if zone is None or not stationary:
             continue
+        print(f"  standing in zone: {v.get('name') or mmsi} "
+              f"IMO {v.get('imo') or '?'}, {zone}")
 
         entry = state.get(mmsi)
         if entry is None or entry["zone"] != zone or run_time - parse(entry["last_seen"]) > gap:
@@ -187,6 +241,8 @@ def update_state(snapshot, state, cfg, run_time):
             })
 
         state[mmsi] = entry
+
+    print(f"inside repair zones: {in_zone} ({moving} of them moving)")
 
     cutoff = run_time - timedelta(days=30)
     state = {m: e for m, e in state.items() if parse(e["last_seen"]) > cutoff}
@@ -232,6 +288,9 @@ async def main():
         sys.exit("AISSTREAM_API_KEY is not set")
 
     cfg = load_json(ZONES_FILE, None)
+    override = os.environ.get("LISTEN_SECONDS")
+    if override:
+        cfg["rules"]["listen_seconds"] = int(override)
     state = load_json(STATE_FILE, {})
     run_time = now()
 
