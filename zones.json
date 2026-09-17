@@ -8,6 +8,14 @@
       "lat_max": 57.0375,
       "lon_min": 24.1130,
       "lon_max": 24.1350,
+      "priority": "medium"
+    },
+    {
+      "name": "All Riga Ports)",
+      "lat_min": 57.068991, 
+      "lat_max": 57.009717, 
+      "lon_min": 23.991208,
+      "lon_max": 24.140820,
       "priority": "high"
     },
     {
