@@ -51,6 +51,16 @@ def load_json(path, default):
     return default
 
 
+def normalise_zones(cfg):
+    """Swap min/max if they were entered the wrong way round, and say so."""
+    for z in cfg["zones"]:
+        for lo, hi in (("lat_min", "lat_max"), ("lon_min", "lon_max")):
+            if z[lo] > z[hi]:
+                z[lo], z[hi] = z[hi], z[lo]
+                print(f"note: {lo}/{hi} were swapped in zone '{z['name']}' — corrected")
+    return cfg
+
+
 def find_zone(lat, lon, zones):
     for z in zones:
         if z["lat_min"] <= lat <= z["lat_max"] and z["lon_min"] <= lon <= z["lon_max"]:
@@ -139,7 +149,15 @@ async def collect(api_key, cfg):
 
     if dropped:
         print(f"filtered out {len(dropped)}: " + "; ".join(dropped[:15]))
-    return kept
+
+    notes = [
+        f"- messages received: {stats['raw']} "
+        f"({stats['position']} position, {stats['static']} static, {stats['other']} other)",
+        f"- unique vessels in box: {len(seen)}",
+        f"- passed the filters: {len(kept)}",
+        f"- filtered out: {len(dropped)}",
+    ]
+    return kept, seen, notes
 
 
 def handle_message(msg, seen):
@@ -259,6 +277,31 @@ def append_events(events):
             writer.writerow(row)
 
 
+def write_debug(snapshot, cfg, run_time, notes):
+    """Dump what this run actually saw, so the result can be checked later."""
+    lines = [f"# Debug report — {iso(run_time)}", ""]
+    lines += notes + ["", "## Zones in use", ""]
+    for z in cfg["zones"]:
+        lines.append(
+            f"- {z['name']}: lat {z['lat_min']}–{z['lat_max']}, "
+            f"lon {z['lon_min']}–{z['lon_max']}"
+        )
+    lines += ["", "## Vessels seen in the subscription box", ""]
+    if not snapshot:
+        lines.append("_None._")
+    else:
+        lines.append("| MMSI | Name | IMO | Lat | Lon | Speed | Type | Length | Zone |")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
+        for mmsi, v in sorted(snapshot.items()):
+            zone = find_zone(v["lat"], v["lon"], cfg["zones"]) if v["lat"] else None
+            lines.append(
+                f"| {mmsi} | {v.get('name') or ''} | {v.get('imo') or ''} "
+                f"| {v.get('lat')} | {v.get('lon')} | {v.get('sog')} "
+                f"| {v.get('ship_type')} | {v.get('length_m')} | {zone or '—'} |"
+            )
+    (BASE / "debug.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def write_current(state, cfg, run_time):
     """Human-readable snapshot of who is sitting in the zones right now."""
     fresh = timedelta(hours=cfg["rules"]["session_gap_hours"])
@@ -288,6 +331,7 @@ async def main():
         sys.exit("AISSTREAM_API_KEY is not set")
 
     cfg = load_json(ZONES_FILE, None)
+    cfg = normalise_zones(cfg)
     override = os.environ.get("LISTEN_SECONDS")
     if override:
         cfg["rules"]["listen_seconds"] = int(override)
@@ -295,13 +339,14 @@ async def main():
     run_time = now()
 
     try:
-        snapshot = await collect(api_key, cfg)
+        snapshot, everything, notes = await collect(api_key, cfg)
     except Exception as exc:
         print(f"stream error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     print(f"collected {len(snapshot)} qualifying vessels in the subscription box")
 
+    write_debug(everything, cfg, run_time, notes)
     state, events = update_state(snapshot, state, cfg, run_time)
 
     STATE_FILE.write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
