@@ -1,4 +1,4 @@
-# Debug report — 2026-09-22T12:24:00Z
+# Debug report — 2026-09-22T18:23:17Z
 
 - messages received: 1 (0 position, 0 static, 1 other)
 - unique vessels in box: 0
