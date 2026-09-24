@@ -1,3 +1,3 @@
-# Vessels in Riga repair zones — updated 2026-09-23T18:22:49Z
+# Vessels in Riga repair zones — updated 2026-09-24T00:25:58Z
 
 _No qualifying vessels right now._
